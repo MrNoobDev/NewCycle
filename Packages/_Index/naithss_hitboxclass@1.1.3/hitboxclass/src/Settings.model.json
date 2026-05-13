@@ -1,0 +1,22 @@
+{
+    "ClassName": "Folder",
+    "Children": [
+        {
+            "Name": "Alive Folder",
+            "ClassName": "ObjectValue"
+        },
+        
+        {
+            "Name": "Projectile Folder",
+            "ClassName": "ObjectValue"
+        },
+
+        {
+            "Name": "Velocity Prediction Constant",
+            "ClassName": "NumberValue",
+            "Properties": {
+                "Value": 6
+            }
+        }
+    ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "newcycle",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [
+    "Roblox",
+    "Nevermore",
+    "Lua"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@quenty/binder": "^14.34.2",
+    "@quenty/clienttranslator": "^14.35.2",
+    "@quenty/cmdrservice": "^13.41.2",
+    "@quenty/loader": "^10.11.0",
+    "@quenty/servicebag": "^11.17.0"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

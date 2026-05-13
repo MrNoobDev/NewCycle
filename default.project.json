@@ -1,0 +1,36 @@
+{
+  "name": "NewCycle",
+  "globIgnorePaths": [ "**/.package-lock.json" ],
+  "tree": {
+    "$className": "DataModel",
+        "ReplicatedStorage": {
+      "ClientLibraries": {
+        "$path": "src/libraries"
+      },
+      "Packages": {
+        "$path": "Packages"
+      }
+    },
+    "ServerScriptService": {
+      "NewCycle": {
+        "$className": "Folder",
+        "game": {
+          "$path": "src/modules"
+        },
+        "node_modules": {
+          "$path": "node_modules"
+        }
+      },
+      "NewCycleScripts": {
+        "$path": "src/scripts/Server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "NewCycleScripts": {
+          "$path": "src/scripts/Client"
+        }
+      }
+    }
+  }
+}
