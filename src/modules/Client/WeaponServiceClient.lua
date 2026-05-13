@@ -1,15 +1,18 @@
 local require = require(script.Parent.loader).load(script)
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Maid = require("Maid")
 
-local weaponPackets = require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponPackets"))
-local weaponRegistry = require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponRegistry"))
-local weaponUtil = require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
+local weaponPackets =
+	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponPackets"))
+local weaponRegistry =
+	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponRegistry"))
+local weaponUtil =
+	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
 
 local weaponController = require(script.Parent.Weapons.WeaponController)
 
@@ -20,7 +23,7 @@ function weaponServiceClient:Init(serviceBag)
 	self.serviceBag = assert(serviceBag, "No serviceBag")
 	self.maid = Maid.new()
 	self.player = Players.LocalPlayer
-	self.character = self.player.Character or self.player.CharacterAdded:Wait()
+	self.character = self.player.Character
 	self.weaponControllers = {}
 	self.equippedWeaponId = nil
 	self.platformType = self:_getPlatformType()
@@ -54,7 +57,7 @@ function weaponServiceClient:Start()
 	end))
 
 	weaponPackets.assignWeapon.listen(function(data)
-		self:_assignWeapon(data.weaponId)
+		self:_assignWeapon(data.weaponId, data.isEquipped)
 	end)
 
 	weaponPackets.feedback.listen(function(data)
@@ -64,28 +67,45 @@ function weaponServiceClient:Start()
 		end
 	end)
 
+	if self.character then
+		for _, controller in pairs(self.weaponControllers) do
+			controller:setCharacter(self.character)
+		end
+	end
+
+	weaponPackets.requestLoadout.send({
+		_ = true,
+	})
+
 	self:_refreshMobileUi()
 end
 
-function weaponServiceClient:_assignWeapon(weaponId)
+function weaponServiceClient:_assignWeapon(weaponId, isEquipped)
 	if weaponId == "" then
 		return
 	end
 
-	if self.weaponControllers[weaponId] then
+	local controller = self.weaponControllers[weaponId]
+	if not controller then
+		local config = weaponRegistry.getWeaponConfig(weaponId)
+		if not config then
+			return
+		end
+
+		controller = weaponController.new(self.player, config)
+		controller:setCharacter(self.character)
+		self.weaponControllers[weaponId] = controller
+	end
+
+	if isEquipped or not self.equippedWeaponId then
 		self.equippedWeaponId = weaponId
-		return
+		controller:setEquipped(true)
+		for otherWeaponId, otherController in pairs(self.weaponControllers) do
+			if otherWeaponId ~= weaponId then
+				otherController:setEquipped(false)
+			end
+		end
 	end
-
-	local config = weaponRegistry.getWeaponConfig(weaponId)
-	if not config then
-		return
-	end
-
-	local controller = weaponController.new(self.player, config)
-	controller:setCharacter(self.character)
-	self.weaponControllers[weaponId] = controller
-	self.equippedWeaponId = weaponId
 end
 
 function weaponServiceClient:_getEquippedController()
@@ -193,7 +213,11 @@ function weaponServiceClient:_getPlatformType()
 		return "Mobile"
 	end
 
-	if UserInputService.GamepadEnabled and not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled then
+	if
+		UserInputService.GamepadEnabled
+		and not UserInputService.MouseEnabled
+		and not UserInputService.KeyboardEnabled
+	then
 		return "Console"
 	end
 

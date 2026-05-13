@@ -1,7 +1,14 @@
 local replicatedStorage = game:GetService("ReplicatedStorage")
 
-local gentPipe = require(replicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("Configs"):WaitForChild("GentPipe"))
-local weaponUtil = require(replicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
+local gentPipe = require(
+	replicatedStorage
+		:WaitForChild("ClientLibraries")
+		:WaitForChild("Weapons")
+		:WaitForChild("Configs")
+		:WaitForChild("GentPipe")
+)
+local weaponUtil =
+	require(replicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
 
 local weaponRegistry = {}
 

@@ -1,7 +1,10 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+-- viewmodel controller
+--//
 
-local weaponUtil = require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local weaponUtil =
+	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
 
 local viewmodelController = {}
 viewmodelController.__index = viewmodelController
@@ -17,6 +20,7 @@ function viewmodelController.new(player, config)
 	self.lastCameraFrame = CFrame.new()
 	self.swayOffset = CFrame.new()
 	self.bobOffset = CFrame.new()
+	self.wallOffset = CFrame.new()
 	return self
 end
 
@@ -37,11 +41,16 @@ function viewmodelController:load()
 
 	self.viewmodel = template:Clone()
 	self.viewmodel.Parent = camera
-	self.viewmodel.PrimaryPart = self.viewmodel:FindFirstChild("HumanoidRootPart")
+	self.viewmodel.PrimaryPart = self.viewmodel:FindFirstChild("HumanoidRootPart") or self.viewmodel.PrimaryPart
 	self.lastCameraFrame = camera.CFrame
+	self.swayOffset = CFrame.new()
+	self.bobOffset = CFrame.new()
+	self.wallOffset = CFrame.new()
+	self.shakeVelocity = Vector3.zero
+	self.shakeOffset = Vector3.zero
 
 	self:_setPartsVisible(false)
-	task.delay(0.1, function()
+	task.delay(0.03, function()
 		if self.viewmodel then
 			self:_setPartsVisible(true)
 		end
@@ -64,30 +73,51 @@ function viewmodelController:update(deltaTime)
 	local rotationOffset = camera.CFrame:ToObjectSpace(self.lastCameraFrame)
 	local rotX, rotY = rotationOffset:ToOrientation()
 	self.swayOffset = self.swayOffset:Lerp(
-		CFrame.Angles(math.sin(rotX) * -0.3, math.sin(rotY) * -0.3, 0),
-		self.config.camera.swayLerp
+		CFrame.Angles(math.sin(rotX) * -0.12, math.sin(rotY) * -0.12, 0),
+		math.clamp((self.config.camera.swayLerp or 0.2) * 0.45, 0, 1)
 	)
 	self.lastCameraFrame = camera.CFrame
 
 	local humanoid = self.humanoid
-	if humanoid and humanoid.MoveDirection.Magnitude > 0 then
-		local bobSpeed = humanoid.WalkSpeed == 10 and 5 or 4
-		local bobLerp = humanoid.WalkSpeed == 10 and self.config.camera.bobMovingLerp or 0.5
+	if humanoid and humanoid.MoveDirection.Magnitude > 0.05 then
+		local moveSpeed = math.max(humanoid.WalkSpeed, 1)
+		local bobSpeed = moveSpeed <= 10 and 5 or 4.5
+		local bobLerp = math.clamp((self.config.camera.bobMovingLerp or 0.1) * 0.45, 0, 1)
+		local cameraOffsetY = humanoid.CameraOffset.Y or 0
+
 		self.bobOffset = self.bobOffset:Lerp(
-			CFrame.new(math.cos(time() * bobSpeed) * 0.1, -humanoid.CameraOffset.Y / 3, 0)
-				* CFrame.Angles(0, math.sin(time() * -bobSpeed) * -0.1, math.cos(time() * -bobSpeed) * 0.1)
-				* self.config.camera.sprintOffset,
+			CFrame.new(
+				math.cos(time() * bobSpeed) * 0.022,
+				(-cameraOffsetY / 3) + math.abs(math.sin(time() * bobSpeed * 2)) * 0.012,
+				0
+			)
+				* CFrame.Angles(0, math.sin(time() * -bobSpeed) * -0.015, math.cos(time() * -bobSpeed) * 0.015)
+				* (self.config.camera.sprintOffset or CFrame.new()),
 			bobLerp
 		)
 	else
 		local cameraOffsetY = humanoid and humanoid.CameraOffset.Y or 0
-		self.bobOffset = self.bobOffset:Lerp(CFrame.new(0, -cameraOffsetY / 3, 0), self.config.camera.bobIdleLerp)
+		self.bobOffset = self.bobOffset:Lerp(
+			CFrame.new(0, -cameraOffsetY / 3, 0),
+			math.clamp((self.config.camera.bobIdleLerp or 0.1) * 0.6, 0, 1)
+		)
 	end
 
-	self.shakeVelocity = self.shakeVelocity:Lerp(Vector3.zero, math.clamp(deltaTime * self.config.camera.shakeDecay, 0, 1))
-	self.shakeOffset = self.shakeOffset:Lerp(self.shakeVelocity, 0.35)
+	local wallTarget = self:_getWallOffset(camera)
+	self.wallOffset = self.wallOffset:Lerp(wallTarget, math.clamp(deltaTime * 18, 0, 1))
 
-	self.viewmodel:PivotTo(camera.CFrame * self.config.camera.viewmodelOffset * self.swayOffset * CFrame.new(self.shakeOffset) * self.bobOffset)
+	self.shakeVelocity =
+		self.shakeVelocity:Lerp(Vector3.zero, math.clamp(deltaTime * (self.config.camera.shakeDecay or 10), 0, 1))
+	self.shakeOffset = self.shakeOffset:Lerp(self.shakeVelocity, 0.25)
+
+	self.viewmodel:PivotTo(
+		camera.CFrame
+			* self.config.camera.viewmodelOffset
+			* self.wallOffset
+			* self.swayOffset
+			* CFrame.new(self.shakeOffset)
+			* self.bobOffset
+	)
 end
 
 function viewmodelController:impulseShake(shake)
@@ -179,7 +209,9 @@ function viewmodelController:_setPartsVisible(isVisible)
 
 	for _, descendant in ipairs(self.viewmodel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
-			descendant.Transparency = isVisible and (self.config.effects.hiddenViewmodelParts[descendant.Name] and 1 or 0) or 1
+			descendant.Transparency = isVisible
+					and (self.config.effects.hiddenViewmodelParts[descendant.Name] and 1 or 0)
+				or 1
 		end
 	end
 end
@@ -203,6 +235,37 @@ function viewmodelController:_loadAnimations()
 	end
 	self.animations.primaryAttack = self.animations.primaryAttack or self.animations.fire
 	self.animations.secondaryAttack = self.animations.secondaryAttack or self.animations.fire2
+end
+
+function viewmodelController:_getWallOffset(camera)
+	if not self.character then
+		return CFrame.new()
+	end
+
+	local origin = camera.CFrame.Position
+	local direction = camera.CFrame.LookVector * 1.75
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { self.character, self.viewmodel }
+
+	local result = workspace:Raycast(origin, direction, params)
+	if not result then
+		return CFrame.new()
+	end
+
+	local hitModel = result.Instance and result.Instance:FindFirstAncestorOfClass("Model")
+	local hitHumanoid = hitModel and hitModel:FindFirstChildOfClass("Humanoid")
+	if hitHumanoid then
+		return CFrame.new()
+	end
+
+	local pushBack = math.clamp(1.75 - result.Distance, 0, 0.45)
+	if pushBack <= 0 then
+		return CFrame.new()
+	end
+
+	return CFrame.new(0, 0, pushBack)
 end
 
 return viewmodelController

@@ -4,9 +4,17 @@ local byteNet = require(replicatedStorage:WaitForChild("Packages"):WaitForChild(
 
 return byteNet.defineNamespace("weapons", function()
 	return {
+		requestLoadout = byteNet.definePacket({
+			value = byteNet.struct({
+				_ = byteNet.bool,
+			}),
+			reliabilityType = "reliable",
+		}),
+
 		assignWeapon = byteNet.definePacket({
 			value = byteNet.struct({
 				weaponId = byteNet.string,
+				isEquipped = byteNet.bool,
 			}),
 			reliabilityType = "reliable",
 		}),
@@ -14,7 +22,7 @@ return byteNet.defineNamespace("weapons", function()
 		requestAttack = byteNet.definePacket({
 			value = byteNet.struct({
 				weaponId = byteNet.string,
-				targetPosition = byteNet.vector3,
+				targetPosition = byteNet.vec3,
 				swingIndex = byteNet.uint8,
 			}),
 			reliabilityType = "reliable",

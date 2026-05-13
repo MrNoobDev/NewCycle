@@ -7,6 +7,7 @@ local require = require(loader).bootstrapGame(loader.Parent)
 local serviceBag = require("ServiceBag").new()
 
 serviceBag:GetService(require("NPCServiceClient"))
+serviceBag:GetService(require("PlayerServiceClient"))
 serviceBag:GetService(require("WeaponServiceClient"))
 serviceBag:Init()
 serviceBag:Start()
