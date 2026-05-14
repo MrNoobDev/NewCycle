@@ -2,7 +2,6 @@
 --//
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local weaponUtil =
 	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
@@ -12,20 +11,28 @@ viewmodelController.__index = viewmodelController
 
 function viewmodelController.new(player, config)
 	local self = setmetatable({}, viewmodelController)
+
 	self.player = player
 	self.config = config
 	self.viewmodel = nil
 	self.animations = {}
+
 	self.shakeVelocity = Vector3.zero
 	self.shakeOffset = Vector3.zero
 	self.lastCameraFrame = CFrame.new()
+
 	self.swayOffset = CFrame.new()
 	self.bobOffset = CFrame.new()
 	self.wallOffset = CFrame.new()
 	self.aimOffset = CFrame.new()
+
+	self.swaySpeedMultiplier = 1
+	self.swayAmountMultiplier = 1
+
 	self.smoothedLocalMoveDir = Vector3.zero
 	self.strafeTilt = 0
 	self.strafeOffset = 0
+
 	return self
 end
 
@@ -47,6 +54,7 @@ function viewmodelController:load()
 	self.viewmodel = template:Clone()
 	self.viewmodel.Parent = camera
 	self.viewmodel.PrimaryPart = self.viewmodel:FindFirstChild("HumanoidRootPart") or self.viewmodel.PrimaryPart
+
 	self.lastCameraFrame = camera.CFrame
 	self.swayOffset = CFrame.new()
 	self.bobOffset = CFrame.new()
@@ -54,6 +62,8 @@ function viewmodelController:load()
 	self.aimOffset = CFrame.new()
 	self.shakeVelocity = Vector3.zero
 	self.shakeOffset = Vector3.zero
+	self.swaySpeedMultiplier = 1
+	self.swayAmountMultiplier = 1
 
 	self:_setPartsVisible(false)
 	task.delay(0.03, function()
@@ -65,8 +75,6 @@ function viewmodelController:load()
 	self:_loadAnimations()
 	self:playIdle()
 end
-
-local vmScale = 0.7
 
 function viewmodelController:update(deltaTime)
 	if not self.viewmodel or not self.viewmodel.PrimaryPart then
@@ -83,17 +91,60 @@ function viewmodelController:update(deltaTime)
 		playerMouse.TargetFilter = self.viewmodel
 	end
 
+	local humanoid = self.humanoid
+
+	local isBlocking = humanoid and humanoid:GetAttribute("WeaponBlocking") == true
+	local isStunned = humanoid and humanoid:GetAttribute("WeaponStunned") == true
+	local isCrouching = humanoid and humanoid:GetAttribute("Crouching") == true
+	local isSprinting = humanoid and humanoid:GetAttribute("Sprinting") == true
+
+	if humanoid then
+		if humanoid.WalkSpeed <= 8 then
+			isCrouching = true
+			isSprinting = false
+		elseif humanoid.WalkSpeed >= 18 then
+			isSprinting = true
+			isCrouching = false
+		end
+	end
+
+	local targetSwaySpeedMultiplier = 1
+	local targetSwayAmountMultiplier = 1
+
+	if isSprinting then
+		targetSwaySpeedMultiplier = 1.15
+	elseif isCrouching then
+		targetSwaySpeedMultiplier = 0.82
+	end
+
+	if isBlocking then
+		targetSwayAmountMultiplier = 0.45
+		targetSwaySpeedMultiplier *= 0.85
+	end
+
+	if isStunned then
+		targetSwayAmountMultiplier = 0.25
+		targetSwaySpeedMultiplier = 0.65
+	end
+
+	local swayTransitionAlpha = 1 - math.exp(-deltaTime * 10)
+	self.swaySpeedMultiplier += (targetSwaySpeedMultiplier - self.swaySpeedMultiplier) * swayTransitionAlpha
+	self.swayAmountMultiplier += (targetSwayAmountMultiplier - self.swayAmountMultiplier) * swayTransitionAlpha
+
 	local rotationOffset = camera.CFrame:ToObjectSpace(self.lastCameraFrame)
 	local rotX, rotY = rotationOffset:ToOrientation()
 
-	local currentSwayAmount = self.config.camera and self.config.camera.viewmodelSwayAmount or -0.12
+	local baseSwayAmount = self.config.camera and self.config.camera.viewmodelSwayAmount or -0.12
+	local currentSwayAmount = baseSwayAmount * self.swayAmountMultiplier
+	local swayLerpAlpha = math.clamp(0.2 * self.swaySpeedMultiplier, 0.08, 0.35)
+
 	self.swayOffset = self.swayOffset:Lerp(
 		CFrame.Angles(math.sin(rotX) * currentSwayAmount, math.sin(rotY) * currentSwayAmount, 0),
-		0.2
+		swayLerpAlpha
 	)
+
 	self.lastCameraFrame = camera.CFrame
 
-	local humanoid = self.humanoid
 	if humanoid and humanoid.MoveDirection.Magnitude > 0 then
 		local speed = humanoid.WalkSpeed
 		local bobSpeed = speed == 10 and 5 or 4
@@ -104,35 +155,35 @@ function viewmodelController:update(deltaTime)
 		local moveDir = humanoid.MoveDirection
 		local targetLocalMoveDir = rootPart and rootPart.CFrame:VectorToObjectSpace(moveDir) or Vector3.zero
 
-		-- smooth movement direction
 		local moveLerpAlpha = 1 - math.exp(-deltaTime * 10)
 		self.smoothedLocalMoveDir = self.smoothedLocalMoveDir:Lerp(targetLocalMoveDir, moveLerpAlpha)
 
-		-- smooth strafe response
-		local targetStrafeTilt =
-			math.clamp(-self.smoothedLocalMoveDir.X * (0.12 * vmScale), -(0.12 * vmScale), 0.12 * vmScale)
-		local targetStrafeOffset =
-			math.clamp(self.smoothedLocalMoveDir.X * (0.06 * vmScale), -(0.06 * vmScale), 0.06 * vmScale)
+		local targetStrafeTilt = math.clamp(-self.smoothedLocalMoveDir.X * 0.12, -0.12, 0.12)
+		local targetStrafeOffset = math.clamp(self.smoothedLocalMoveDir.X * 0.06, -0.06, 0.06)
+
 		local strafeLerpAlpha = 1 - math.exp(-deltaTime * 12)
 		self.strafeTilt = self.strafeTilt + (targetStrafeTilt - self.strafeTilt) * strafeLerpAlpha
 		self.strafeOffset = self.strafeOffset + (targetStrafeOffset - self.strafeOffset) * strafeLerpAlpha
 
+		local forwardInfluence = math.clamp(self.smoothedLocalMoveDir.Z * 0.04, -0.02, 0.04)
+		local strafeVerticalInfluence = math.abs(self.smoothedLocalMoveDir.X) * 0.015
+		local walkHeightOffset = 0.16 + forwardInfluence + strafeVerticalInfluence
+
 		local bobTarget = CFrame.new(
-			math.cos(tick() * bobSpeed) * (0.1 * vmScale) + self.strafeOffset,
-			-(humanoid.CameraOffset.Y / 3) * vmScale,
+			math.cos(tick() * bobSpeed) * 0.1 + self.strafeOffset,
+			-(humanoid.CameraOffset.Y / 3) + walkHeightOffset,
 			0
 		) * CFrame.Angles(
 			0,
-			math.sin(tick() * -bobSpeed) * (-0.1 * vmScale),
-			math.cos(tick() * -bobSpeed) * (0.1 * vmScale) + self.strafeTilt
-		) * sprintOffset
+			math.sin(tick() * -bobSpeed) * -0.1,
+			math.cos(tick() * -bobSpeed) * 0.1 + self.strafeTilt
+		) * CFrame.Angles(0, 0, -self.smoothedLocalMoveDir.X * 0.035) * sprintOffset
 
 		local bobLerpAlpha = 1 - math.exp(-deltaTime * 8)
 		self.bobOffset = self.bobOffset:Lerp(bobTarget, bobLerpAlpha)
 	else
 		local cameraOffsetY = humanoid and humanoid.CameraOffset.Y or 0
 
-		-- smooth return to neutral when stopping
 		local moveLerpAlpha = 1 - math.exp(-deltaTime * 10)
 		self.smoothedLocalMoveDir = self.smoothedLocalMoveDir:Lerp(Vector3.zero, moveLerpAlpha)
 
@@ -140,13 +191,13 @@ function viewmodelController:update(deltaTime)
 		self.strafeTilt = self.strafeTilt + (0 - self.strafeTilt) * strafeLerpAlpha
 		self.strafeOffset = self.strafeOffset + (0 - self.strafeOffset) * strafeLerpAlpha
 
-		local idleTarget = CFrame.new(0, -(cameraOffsetY / 3) * vmScale, 0)
+		local idleTarget = CFrame.new(0, -(cameraOffsetY / 3), 0)
 		local bobLerpAlpha = 1 - math.exp(-deltaTime * 6)
 		self.bobOffset = self.bobOffset:Lerp(idleTarget, bobLerpAlpha)
 	end
 
 	local wallTarget = self:_getWallOffset(camera)
-	self.wallOffset = self.wallOffset:Lerp(wallTarget, math.clamp(deltaTime * 18, 0, 1))
+	self.wallOffset = self.wallOffset:Lerp(wallTarget, math.clamp(deltaTime * 24, 0, 1))
 
 	self.shakeVelocity =
 		self.shakeVelocity:Lerp(Vector3.zero, math.clamp(deltaTime * (self.config.camera.shakeDecay or 10), 0, 1))
@@ -161,11 +212,15 @@ function viewmodelController:update(deltaTime)
 			* self.swayOffset
 			* self.aimOffset
 			* self.bobOffset
-			* CFrame.new(self.shakeOffset * vmScale)
+			* CFrame.new(self.shakeOffset)
 	)
 end
 
 function viewmodelController:impulseShake(shake)
+	if not shake then
+		return
+	end
+
 	self.shakeVelocity += Vector3.new(
 		(math.random() - 0.5) * shake.X,
 		(math.random() - 0.5) * shake.Y,
@@ -174,59 +229,177 @@ function viewmodelController:impulseShake(shake)
 end
 
 function viewmodelController:playIdle()
-	if self.animations.idle then
-		self.animations.idle:Play()
+	local idleTrack = self.animations.idle
+	if not idleTrack then
+		return
+	end
+
+	if self.animations.block and self.animations.block.IsPlaying then
+		return
+	end
+
+	if self.animations.blockBreak and self.animations.blockBreak.IsPlaying then
+		return
+	end
+
+	if self.animations.primaryAttack and self.animations.primaryAttack.IsPlaying then
+		return
+	end
+
+	if self.animations.secondaryAttack and self.animations.secondaryAttack.IsPlaying then
+		return
+	end
+
+	idleTrack.Looped = true
+	if not idleTrack.IsPlaying then
+		idleTrack:Play(0.15)
 	end
 end
 
 function viewmodelController:playAttack(swingIndex)
-	if self.animations.idle then
-		self.animations.idle:Stop()
+	if self.animations.block then
+		self.animations.block:Stop(0.05)
 	end
 
+	if self.animations.blockBreak then
+		self.animations.blockBreak:Stop(0.05)
+	end
+
+	if self.animations.idle then
+		self.animations.idle:Stop(0.05)
+	end
+
+	if self.animations.primaryAttack then
+		self.animations.primaryAttack:Stop(0)
+	end
+
+	if self.animations.secondaryAttack then
+		self.animations.secondaryAttack:Stop(0)
+	end
+
+	local attackTrack
 	if swingIndex == 2 and self.animations.secondaryAttack then
-		self.animations.secondaryAttack:Play()
-	elseif self.animations.primaryAttack then
-		self.animations.primaryAttack:Play()
+		attackTrack = self.animations.secondaryAttack
+	else
+		attackTrack = self.animations.primaryAttack
+	end
+
+	if attackTrack then
+		attackTrack.Looped = false
+		attackTrack.TimePosition = 0
+		attackTrack:Play(0.05)
+
+		local connection
+		connection = attackTrack.Stopped:Connect(function()
+			if connection then
+				connection:Disconnect()
+			end
+
+			if self.viewmodel then
+				self:playIdle()
+			end
+		end)
 	end
 end
 
 function viewmodelController:startBlock()
+	local blockTrack = self.animations.block
+	if blockTrack and blockTrack.IsPlaying then
+		return
+	end
+
 	if self.animations.primaryAttack then
-		self.animations.primaryAttack:Stop()
+		self.animations.primaryAttack:Stop(0.05)
 	end
 
 	if self.animations.secondaryAttack then
-		self.animations.secondaryAttack:Stop()
+		self.animations.secondaryAttack:Stop(0.05)
+	end
+
+	if self.animations.blockBreak then
+		self.animations.blockBreak:Stop(0.05)
 	end
 
 	if self.animations.idle then
-		self.animations.idle:Stop()
+		self.animations.idle:Stop(0.05)
 	end
 
-	if self.animations.block then
-		self.animations.block.Looped = true
-		self.animations.block:Play()
+	if blockTrack then
+		blockTrack.Looped = true
+		blockTrack.TimePosition = 0
+		blockTrack:Play(0.1)
 	end
 end
 
 function viewmodelController:stopBlock()
-	if self.animations.block then
-		self.animations.block:Stop()
+	local blockTrack = self.animations.block
+	if blockTrack and blockTrack.IsPlaying then
+		blockTrack:Stop(0.1)
 	end
 
 	self:playIdle()
 end
 
-function viewmodelController:showBlockFeedback()
-	self:impulseShake(self.config.camera.blockShake)
-	weaponUtil.toggleViewmodelParticles(self.viewmodel, self.config.effects.blockParticles, true)
+function viewmodelController:playBlockBreak()
+	if self.animations.block then
+		self.animations.block:Stop(0.05)
+	end
 
-	task.delay(self.config.combat.blockDuration, function()
-		if self.viewmodel then
-			weaponUtil.toggleViewmodelParticles(self.viewmodel, self.config.effects.blockParticles, false)
-		end
-	end)
+	if self.animations.primaryAttack then
+		self.animations.primaryAttack:Stop(0.05)
+	end
+
+	if self.animations.secondaryAttack then
+		self.animations.secondaryAttack:Stop(0.05)
+	end
+
+	if self.animations.idle then
+		self.animations.idle:Stop(0.05)
+	end
+
+	local breakTrack = self.animations.blockBreak
+	if breakTrack then
+		breakTrack.Looped = false
+		breakTrack.TimePosition = 0
+		breakTrack:Play(0.05)
+
+		local connection
+		connection = breakTrack.Stopped:Connect(function()
+			if connection then
+				connection:Disconnect()
+			end
+
+			if self.viewmodel then
+				self:playIdle()
+			end
+		end)
+	else
+		task.delay(0.2, function()
+			if self.viewmodel then
+				self:playIdle()
+			end
+		end)
+	end
+end
+
+function viewmodelController:showBlockFeedback(feedbackKind)
+	local shake = self.config.camera and self.config.camera.blockShake
+	self:impulseShake(shake)
+
+	if not self.viewmodel then
+		return
+	end
+
+	local particles = self.config.effects and self.config.effects.blockParticles
+	if particles then
+		weaponUtil.toggleViewmodelParticles(self.viewmodel, particles, true)
+
+		task.delay(self.config.combat.blockDuration or 0.2, function()
+			if self.viewmodel then
+				weaponUtil.toggleViewmodelParticles(self.viewmodel, particles, false)
+			end
+		end)
+	end
 end
 
 function viewmodelController:destroyViewmodel()
@@ -294,11 +467,25 @@ function viewmodelController:_loadAnimations()
 		local animation = Instance.new("Animation")
 		animation.Name = name
 		animation.AnimationId = animationId
-		self.animations[name] = animator:LoadAnimation(animation)
+
+		local track = animator:LoadAnimation(animation)
+		self.animations[name] = track
+
+		if name == "idle" then
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Idle
+		elseif name == "block" then
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Action
+		else
+			track.Looped = false
+			track.Priority = Enum.AnimationPriority.Action
+		end
 	end
 
 	self.animations.primaryAttack = self.animations.primaryAttack or self.animations.fire
 	self.animations.secondaryAttack = self.animations.secondaryAttack or self.animations.fire2
+	self.animations.blockBreak = self.animations.blockBreak or self.animations.guardBreak
 end
 
 function viewmodelController:_getWallOffset(camera)
@@ -306,8 +493,13 @@ function viewmodelController:_getWallOffset(camera)
 		return CFrame.new()
 	end
 
+	local wallCheckDistance = 2.4
+	local maxPushBack = 0.8
+	local maxLower = 0.28
+	local maxTilt = math.rad(24)
+
 	local origin = camera.CFrame.Position
-	local direction = camera.CFrame.LookVector * 1.75
+	local direction = camera.CFrame.LookVector * wallCheckDistance
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -324,12 +516,18 @@ function viewmodelController:_getWallOffset(camera)
 		return CFrame.new()
 	end
 
-	local pushBack = math.clamp((1.75 * vmScale) - result.Distance, 0, 0.45 * vmScale)
-	if pushBack <= 0 then
+	local alpha = math.clamp((wallCheckDistance - result.Distance) / wallCheckDistance, 0, 1)
+	if alpha <= 0 then
 		return CFrame.new()
 	end
 
-	return CFrame.new(0, 0, pushBack)
+	alpha = alpha ^ 0.65
+
+	local pushBack = alpha * maxPushBack
+	local lower = alpha * maxLower
+	local tilt = alpha * maxTilt
+
+	return CFrame.new(0, -lower, pushBack) * CFrame.Angles(-tilt, 0, 0)
 end
 
 return viewmodelController

@@ -80,6 +80,10 @@ function NPCBase.new(instance, config)
 	self._humanoid.BreakJointsOnDeath = false
 	self._humanoid.RequiresNeck = false
 
+	self._lastHealth = self._humanoid.Health
+	self._lastHitReactClock = 0
+	self._hitReactIndex = 0
+
 	self._path = PathfindingService:CreatePath({
 		AgentRadius = self._config.AgentRadius or 3,
 		AgentHeight = self._config.AgentHeight or 5,
@@ -120,12 +124,59 @@ function NPCBase:Init()
 		end
 		self:_onDied()
 	end)
+	local healthConn
+	healthConn = self._humanoid.HealthChanged:Connect(function(newHealth)
+		if self._destroyed then
+			return
+		end
+
+		if self:IsDead() then
+			return
+		end
+
+		if newHealth < self._lastHealth then
+			self:_playHitReaction()
+		end
+
+		self._lastHealth = newHealth
+	end)
+
+	table.insert(self._connections, healthConn)
 	table.insert(self._connections, diedConn)
 
 	if self._humanoid.Health <= 0 then
 		task.defer(function()
 			self:_onDied()
 		end)
+	end
+end
+
+function NPCBase:_playHitReaction()
+	if self._destroyed or self:IsDead() then
+		return
+	end
+
+	if not self._animator then
+		return
+	end
+
+	local now = os.clock()
+	local cooldown = self._config.HitReactCooldown or 0.25
+
+	if now - self._lastHitReactClock < cooldown then
+		return
+	end
+
+	self._lastHitReactClock = now
+
+	local hitCount = self._config.HitAnimationCount or 2
+	self._hitReactIndex = self._hitReactIndex % hitCount + 1
+
+	local track = self._animator:PlayAction("Hit", 0.08, nil, self._hitReactIndex)
+		or self._animator:PlayAction("Hits", 0.08, nil, self._hitReactIndex)
+
+	if track then
+		track.Looped = false
 	end
 end
 
@@ -159,21 +210,26 @@ function NPCBase:_onDied()
 		local deathTrack = self._animator:GetTrack("Death")
 		if deathTrack then
 			local markerName = self._config.DeathPauseMarker or "End"
+
 			deathTrack.Looped = false
+			deathTrack:Play(0.1)
+
 			local markerConn
 			markerConn = deathTrack:GetMarkerReachedSignal(markerName):Connect(function()
 				if markerConn then
 					markerConn:Disconnect()
 					markerConn = nil
 				end
-				if not deathTrack.Parent then
-					return
-				end
+
 				deathTrack.TimePosition = math.max(deathTrack.TimePosition - 0.03, 0)
 				deathTrack:AdjustSpeed(0)
+
+				print("[NPCBase] Death animation frozen at marker:", markerName)
 			end)
+
 			table.insert(self._connections, markerConn)
-			deathTrack:Play(0.1)
+		else
+			warn("[NPCBase] No Death animation track found for:", self._instance.Name)
 		end
 	end
 

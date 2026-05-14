@@ -91,12 +91,13 @@ function playerServiceClient:Destroy()
 end
 
 function playerServiceClient:_bindCharacter(character)
-	self.stateController:setCharacter(character)
-	self.cameraController:setCharacter(character)
-	self.footstepController:setCharacter(character)
-	self:_refreshMobileUi()
+	task.spawn(function()
+		self.stateController:setCharacter(character)
+		self.cameraController:setCharacter(character)
+		self.footstepController:setCharacter(character)
+		self:_refreshMobileUi()
+	end)
 end
-
 function playerServiceClient:_refreshMobileUi()
 	local playerGui = self.player:FindFirstChildOfClass("PlayerGui")
 	local gameplay = playerGui and playerGui:FindFirstChild("Gameplay")
@@ -140,7 +141,11 @@ function playerServiceClient:_getPlatformType()
 	if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
 		return "Mobile"
 	end
-	if UserInputService.GamepadEnabled and not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled then
+	if
+		UserInputService.GamepadEnabled
+		and not UserInputService.MouseEnabled
+		and not UserInputService.KeyboardEnabled
+	then
 		return "Console"
 	end
 	return "PC"

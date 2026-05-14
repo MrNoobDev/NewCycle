@@ -36,22 +36,44 @@ local gentPipe = {
 		},
 	},
 	combat = {
-		attackCooldown = 0.5,
-		hitCooldown = 0.1,
+		attackCooldown = 0.8,
+
+		-- Blocking
+		perfectBlockWindow = 0.2,
+		maxBlockTime = 3,
+
+		blockCooldown = 0.35,
+		blockTimeoutCooldown = 0.5,
+		blockBreakCooldown = 0.9,
+
+		blockBreakStun = 0.6,
+		parriedStunDuration = 1,
+
+		attackCastDelay = 0.22,
+		debugHitVisualizer = false,
+
+		hitBoxForwardOffset = 2.8,
+		hitBoxSize = Vector3.new(5, 4, 5.5),
+		blockDamageMultiplier = 0.35,
+		blockWalkSpeed = 4,
+		blockBreakDamageMultiplier = 0.75,
+		guardDamage = 25,
+
 		blockDuration = 0.05,
-		maxHitDistance = 3,
+		blockAngle = 115,
+
+		hitCooldown = 0.1,
+		maxHitDistance = 6.5,
 		hitPartSpeed = 80,
 		hitPartLifetime = 0.15,
 		hitPartSize = Vector3.new(2, 2, 4),
-		blockAngle = 115,
-		damage = {
-			base = 100,
-			headshot = 100,
-			bodyshot = 100,
-		},
+
+		baseDamage = 28,
+		closeDamageDistance = 1.75,
+		minDistanceDamageMultiplier = 0.8,
 	},
 	camera = {
-		viewmodelOffset = CFrame.new(0, 0, -0.6),
+		viewmodelOffset = CFrame.new(0, 0.05, -0.6),
 		sprintOffset = CFrame.new(0, 0, 0) * CFrame.Angles(math.rad(-9), 0, 0),
 
 		bobMovingLerp = 0.1,
@@ -71,6 +93,16 @@ local gentPipe = {
 			show = { "Rope_Henry2" },
 			hide = { "default_L", "hand", "ring", "Rope_Henry" },
 		},
+		hitInkVfxPath = { "Assets", "VFX", "WeaponHitInk", "Attachment" },
+
+		hitInkEmit = {
+			blood1 = 8,
+			blood2 = 4,
+		},
+
+		hitInkDripOutTime = 1,
+		hitInkLifetime = 1.35,
+
 		hiddenViewmodelParts = {
 			RootPart = true,
 			Muzzle = true,

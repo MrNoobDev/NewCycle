@@ -40,6 +40,7 @@ return {
 				"rbxassetid://98263475781276",
 				"rbxassetid://87659306937441",
 			},
+			Alert = "rbxassetid://103542621167929",
 		},
 	},
 

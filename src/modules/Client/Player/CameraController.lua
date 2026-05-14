@@ -46,7 +46,7 @@ function cameraController.new(config)
 	self.wasGrounded = true
 	self.landBounceOffset = 0
 	self.landBounceVelocity = 0
-
+	self.crouchStepAccumulator = 0
 	self.angleX = 0
 	self.bobX = 0
 	self.bobY = 0
@@ -126,7 +126,7 @@ function cameraController:update(dt, stateController)
 	self:_updateFov(dt, stateController)
 	self:_updateLandBounce(dt)
 	self:_updateBob(dt, stateController)
-	self:_updateCrouchKick(stateController)
+	self:_updateCrouchKick(dt, stateController)
 	self:_updateFirstPersonBody()
 
 	local shake = self.activeShakeValue and self.activeShakeValue.Value or CFrame.new()
@@ -256,26 +256,50 @@ function cameraController:_updateBob(dt, stateController)
 	self.bobOffset = self.bobOffset:Lerp(target, math.clamp(dt * 10, 0, 1))
 end
 
-function cameraController:_updateCrouchKick(stateController)
+function cameraController:_updateCrouchKick(dt, stateController)
 	local token = stateController:getCrouchKickToken()
-
-	local isCrouching = stateController:isCrouching()
 
 	if token ~= self.lastCrouchToken then
 		self.lastCrouchToken = token
 
+		local isCrouching = self.humanoid and self.humanoid:GetAttribute("Crouching") == true
+
 		if isCrouching then
-			self.crouchKickOffset = CFrame.Angles(math.rad(4), 0, 0)
-			self.crouchKickTarget = CFrame.Angles(math.rad(-6), 0, 0)
+			-- Horror-style crouch kick:
+			-- slight downward dip + sideways roll for immersive first-person motion
+			self.crouchKickTarget = CFrame.Angles(math.rad(2.5), 0, math.rad(3.5))
+
+			task.delay(0.07, function()
+				if self.lastCrouchToken == token then
+					-- rebound upward + opposite lean
+					self.crouchKickTarget = CFrame.Angles(math.rad(-3), 0, math.rad(-4.5))
+				end
+			end)
+
+			task.delay(0.18, function()
+				if self.lastCrouchToken == token then
+					-- settle into subtle crouch lean
+					self.crouchKickTarget = CFrame.Angles(0, 0, math.rad(1.2))
+				end
+			end)
 		else
+			-- uncrouch returns smoothly upright
 			self.crouchKickTarget = CFrame.new()
 		end
 	end
 
-	local lerpSpeed = isCrouching and 0.15 or 0.08
-	self.crouchKickOffset = self.crouchKickOffset:Lerp(self.crouchKickTarget, lerpSpeed)
-end
+	-- fixed 60 FPS simulation for identical feel on all framerates
+	local crouching = self.humanoid and self.humanoid:GetAttribute("Crouching") == true
+	local baseAlpha = crouching and 0.15 or 0.08
 
+	self.crouchStepAccumulator += dt
+	local fixedStep = 1 / 60
+
+	while self.crouchStepAccumulator >= fixedStep do
+		self.crouchStepAccumulator -= fixedStep
+		self.crouchKickOffset = self.crouchKickOffset:Lerp(self.crouchKickTarget, baseAlpha)
+	end
+end
 function cameraController:_updateFirstPersonBody()
 	if not self.character or not self.head then
 		return

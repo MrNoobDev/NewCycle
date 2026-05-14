@@ -56,7 +56,8 @@ function EnemyNPC.new(instance, config)
 	self._isAttacking = false
 	self._isRunning = false
 	self._inAttackZone = false
-
+	self._isAlerting = false
+	self._hasPlayedAlert = false
 	-- Awareness
 	self._awareness = 0
 	self._awarenessState = "Unaware"
@@ -81,6 +82,8 @@ function EnemyNPC:ClearTarget()
 	self._awarenessState = "Unaware"
 	self._isRunning = false
 	self._inAttackZone = false
+	self._isAlerting = false
+	self._hasPlayedAlert = false
 	self._instance:SetAttribute("AwarenessState", "Unaware")
 	self._instance:SetAttribute("Awareness", 0)
 	-- Resume patrol/wander audio
@@ -99,7 +102,7 @@ function EnemyNPC:_onHeartbeat(dt)
 	if self:IsDead() then
 		return
 	end
-	if self._isAttacking then
+	if self._isAttacking or self._isAlerting then
 		return
 	end
 
@@ -123,6 +126,67 @@ function EnemyNPC:_onHeartbeat(dt)
 	end
 
 	self:_tickAnimation()
+end
+
+function EnemyNPC:_playAlertThenChase()
+	if self._isAlerting or self._hasPlayedAlert or self._deathLocked or self:IsDead() then
+		return
+	end
+
+	self._isAlerting = true
+	self._hasPlayedAlert = true
+	self:StopMoving()
+	self._instance:SetAttribute("MoveDirection", Vector3.new())
+
+	if self._humanoid then
+		self._humanoid.WalkSpeed = 0
+	end
+
+	if self._animator then
+		self._animator:SetLocomotion(0)
+
+		local track = self._animator:PlayAction("Alert", 0.1)
+		if track then
+			track.Looped = false
+			track.TimePosition = 0
+			track:AdjustSpeed(1)
+
+			task.spawn(function()
+				local waitStart = os.clock()
+				while track.Length <= 0 and os.clock() - waitStart < 0.5 do
+					task.wait()
+				end
+
+				local length = track.Length
+				if length <= 0 then
+					length = self._config.AlertDuration or 0.8
+				end
+
+				task.wait(length)
+				self:_finishAlert()
+			end)
+
+			return
+		end
+	end
+
+	task.delay(self._config.AlertDuration or 0.8, function()
+		self:_finishAlert()
+	end)
+end
+
+function EnemyNPC:_finishAlert()
+	if self._deathLocked or self:IsDead() then
+		return
+	end
+
+	self._isAlerting = false
+	self._state = "Chasing"
+	self:SetSpeed(self._config.ChaseSpeed or self._config.RunSpeed or 16)
+
+	if self._audio then
+		self._audio:StopVoiceLines()
+	end
 end
 
 --\ Detection — awareness meter with stealth rules \--
@@ -185,11 +249,13 @@ function EnemyNPC:_tickDetection()
 
 	if newState == "Alert" then
 		self._target = player
-		self._state = "Chasing"
-		self:SetSpeed(self._config.ChaseSpeed or self._config.RunSpeed or 16)
+		self._state = "Alerting"
+
 		if self._audio then
 			self._audio:StopVoiceLines()
 		end
+
+		self:_playAlertThenChase()
 	end
 end
 

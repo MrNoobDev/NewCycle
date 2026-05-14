@@ -4,12 +4,13 @@
 return {
 	movement = {
 		walkSpeed = 8,
+		blockSpeed = 4,
 		runSpeed = 12,
 		backwardWalkSpeed = 5,
 		crouchSpeed = 4,
 		standHipHeight = 2,
 		crouchHipHeight = 0.5,
-		jumpPower = 50,
+		jumpPower = 25,
 		jumpCooldown = 0.5,
 		hipTweenDuration = 0.25,
 	},
@@ -30,9 +31,6 @@ return {
 		bobbingHorizontalRun = 0.038,
 		bobbingDepthWalk = 0,
 		bobbingDepthRun = 0,
-		swayAmountWalk = 0.020,
-		swayAmountRun = 0.034,
-		swaySpeed = 1,
 
 		-- land spring
 		landSpring = 20,

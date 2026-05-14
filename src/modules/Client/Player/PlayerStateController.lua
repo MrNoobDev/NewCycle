@@ -81,7 +81,7 @@ function playerStateController:setCharacter(character)
 				return
 			end
 
-			if self.isCrouching or os.clock() < self.jumpLockedUntil then
+			if self.isCrouching or os.clock() < self.jumpLockedUntil or self:_isMovementLocked() then
 				humanoid.Jump = false
 				return
 			end
@@ -112,17 +112,29 @@ function playerStateController:update(cameraLookVector)
 		return
 	end
 
+	local isBlocking = humanoid:GetAttribute("WeaponBlocking") == true
+	local isStunned = humanoid:GetAttribute("WeaponStunned") == true
+		or (self.character and self.character:GetAttribute("isWeaponStunned") == true)
+
 	if self:_isMovementBusy() then
 		self.sprintRequested = false
 	end
 
 	local walkSpeed = self.config.movement.walkSpeed
+	local jumpPower = self.config.movement.jumpPower
 	local moveDirection = humanoid.MoveDirection
 	local moving = moveDirection.Magnitude > 0.1
 	local isRunning = false
 
-	if self.isCrouching then
+	if isStunned then
+		walkSpeed = 0
+		jumpPower = 0
+	elseif isBlocking then
+		walkSpeed = self.config.movement.blockSpeed or self.config.movement.blockWalkSpeed or 4
+		jumpPower = 0
+	elseif self.isCrouching then
 		walkSpeed = self.config.movement.crouchSpeed
+		jumpPower = 0
 	elseif moving then
 		local flatLook = Vector3.new(cameraLookVector.X, 0, cameraLookVector.Z)
 		if flatLook.Magnitude > 0.001 then
@@ -143,15 +155,12 @@ function playerStateController:update(cameraLookVector)
 		humanoid.WalkSpeed = walkSpeed
 	end
 
-	if self.isCrouching then
-		if humanoid.JumpPower ~= 0 then
-			humanoid.JumpPower = 0
-		end
-		if humanoid.Jump then
-			humanoid.Jump = false
-		end
-	elseif humanoid.JumpPower ~= self.config.movement.jumpPower then
-		humanoid.JumpPower = self.config.movement.jumpPower
+	if humanoid.JumpPower ~= jumpPower then
+		humanoid.JumpPower = jumpPower
+	end
+
+	if jumpPower == 0 and humanoid.Jump then
+		humanoid.Jump = false
 	end
 end
 
@@ -177,6 +186,10 @@ function playerStateController:enterCrouch()
 
 	local humanoid = self.humanoid
 	if not humanoid or not humanoid.Parent then
+		return false
+	end
+
+	if self:_isMovementBusy() then
 		return false
 	end
 
@@ -285,7 +298,21 @@ function playerStateController:_isMovementBusy()
 		return false
 	end
 
-	return humanoid:GetAttribute("WeaponBlocking") == true or humanoid:GetAttribute("WeaponBusy") == true
+	return humanoid:GetAttribute("WeaponBlocking") == true
+		or humanoid:GetAttribute("WeaponBusy") == true
+		or humanoid:GetAttribute("WeaponStunned") == true
+		or (self.character and self.character:GetAttribute("isWeaponStunned") == true)
+end
+
+function playerStateController:_isMovementLocked()
+	local humanoid = self.humanoid
+	if not humanoid then
+		return false
+	end
+
+	return humanoid:GetAttribute("WeaponBlocking") == true
+		or humanoid:GetAttribute("WeaponStunned") == true
+		or (self.character and self.character:GetAttribute("isWeaponStunned") == true)
 end
 
 function playerStateController:_tweenHipHeight(targetHeight)
