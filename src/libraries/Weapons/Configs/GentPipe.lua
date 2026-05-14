@@ -3,6 +3,7 @@ local gentPipe = {
 	weaponType = "melee",
 	viewmodelName = "Axe",
 	weaponModelName = "Axe",
+	stage = 2,
 	grantOnSpawn = true,
 	animations = {
 		primaryAttack = "rbxassetid://128405525724519",
@@ -52,7 +53,7 @@ local gentPipe = {
 	camera = {
 		viewmodelOffset = CFrame.new(0, 0, -0.6),
 		sprintOffset = CFrame.new(0, 0, 0) * CFrame.Angles(math.rad(-9), 0, 0),
-		swayLerp = 0.2,
+
 		bobMovingLerp = 0.1,
 		bobIdleLerp = 0.1,
 		shakeDecay = 10,
@@ -81,6 +82,7 @@ local gentPipe = {
 			Joint = true,
 			Main = true,
 			audrey_ink_Gentpipe_Upgrade2 = true,
+			audrey_ink_Gentpipe_Upgrade1 = true,
 			audrey_ink_Gentpipe_Upgrade3 = true,
 			audrey_ink_Gentpipe_socket = true,
 		},

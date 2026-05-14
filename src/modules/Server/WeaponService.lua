@@ -223,7 +223,16 @@ function weaponService:_resolveAttack(player, state, character, rootPart, target
 		return
 	end
 
-	local targetKey = tostring(hitModel:GetDebugId())
+	local distanceToHit = (result.Position - rootPart.Position).Magnitude
+	if distanceToHit > config.combat.maxHitDistance then
+		return
+	end
+
+	local targetKey = hitModel
+	local now = os.clock()
+	if not state:canHit(targetKey, now, config.combat.hitCooldown) then
+		return
+	end
 	local now = os.clock()
 	if not state:canHit(targetKey, now, config.combat.hitCooldown) then
 		return

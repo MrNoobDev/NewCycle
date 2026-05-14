@@ -2,6 +2,7 @@
 --//
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local weaponUtil =
 	require(ReplicatedStorage:WaitForChild("ClientLibraries"):WaitForChild("Weapons"):WaitForChild("WeaponUtil"))
@@ -21,6 +22,10 @@ function viewmodelController.new(player, config)
 	self.swayOffset = CFrame.new()
 	self.bobOffset = CFrame.new()
 	self.wallOffset = CFrame.new()
+	self.aimOffset = CFrame.new()
+	self.smoothedLocalMoveDir = Vector3.zero
+	self.strafeTilt = 0
+	self.strafeOffset = 0
 	return self
 end
 
@@ -46,6 +51,7 @@ function viewmodelController:load()
 	self.swayOffset = CFrame.new()
 	self.bobOffset = CFrame.new()
 	self.wallOffset = CFrame.new()
+	self.aimOffset = CFrame.new()
 	self.shakeVelocity = Vector3.zero
 	self.shakeOffset = Vector3.zero
 
@@ -60,6 +66,8 @@ function viewmodelController:load()
 	self:playIdle()
 end
 
+local vmScale = 0.7
+
 function viewmodelController:update(deltaTime)
 	if not self.viewmodel or not self.viewmodel.PrimaryPart then
 		return
@@ -70,37 +78,71 @@ function viewmodelController:update(deltaTime)
 		return
 	end
 
+	local playerMouse = self.player and self.player:GetMouse()
+	if playerMouse then
+		playerMouse.TargetFilter = self.viewmodel
+	end
+
 	local rotationOffset = camera.CFrame:ToObjectSpace(self.lastCameraFrame)
 	local rotX, rotY = rotationOffset:ToOrientation()
+
+	local currentSwayAmount = self.config.camera and self.config.camera.viewmodelSwayAmount or -0.12
 	self.swayOffset = self.swayOffset:Lerp(
-		CFrame.Angles(math.sin(rotX) * -0.12, math.sin(rotY) * -0.12, 0),
-		math.clamp((self.config.camera.swayLerp or 0.2) * 0.45, 0, 1)
+		CFrame.Angles(math.sin(rotX) * currentSwayAmount, math.sin(rotY) * currentSwayAmount, 0),
+		0.2
 	)
 	self.lastCameraFrame = camera.CFrame
 
 	local humanoid = self.humanoid
-	if humanoid and humanoid.MoveDirection.Magnitude > 0.05 then
-		local moveSpeed = math.max(humanoid.WalkSpeed, 1)
-		local bobSpeed = moveSpeed <= 10 and 5 or 4.5
-		local bobLerp = math.clamp((self.config.camera.bobMovingLerp or 0.1) * 0.45, 0, 1)
-		local cameraOffsetY = humanoid.CameraOffset.Y or 0
+	if humanoid and humanoid.MoveDirection.Magnitude > 0 then
+		local speed = humanoid.WalkSpeed
+		local bobSpeed = speed == 10 and 5 or 4
+		local sprintOffset = self.config.camera and (self.config.camera.sprintCFrame or self.config.camera.sprintOffset)
+			or CFrame.new()
 
-		self.bobOffset = self.bobOffset:Lerp(
-			CFrame.new(
-				math.cos(time() * bobSpeed) * 0.022,
-				(-cameraOffsetY / 3) + math.abs(math.sin(time() * bobSpeed * 2)) * 0.012,
-				0
-			)
-				* CFrame.Angles(0, math.sin(time() * -bobSpeed) * -0.015, math.cos(time() * -bobSpeed) * 0.015)
-				* (self.config.camera.sprintOffset or CFrame.new()),
-			bobLerp
-		)
+		local rootPart = self.character and self.character:FindFirstChild("HumanoidRootPart")
+		local moveDir = humanoid.MoveDirection
+		local targetLocalMoveDir = rootPart and rootPart.CFrame:VectorToObjectSpace(moveDir) or Vector3.zero
+
+		-- smooth movement direction
+		local moveLerpAlpha = 1 - math.exp(-deltaTime * 10)
+		self.smoothedLocalMoveDir = self.smoothedLocalMoveDir:Lerp(targetLocalMoveDir, moveLerpAlpha)
+
+		-- smooth strafe response
+		local targetStrafeTilt =
+			math.clamp(-self.smoothedLocalMoveDir.X * (0.12 * vmScale), -(0.12 * vmScale), 0.12 * vmScale)
+		local targetStrafeOffset =
+			math.clamp(self.smoothedLocalMoveDir.X * (0.06 * vmScale), -(0.06 * vmScale), 0.06 * vmScale)
+		local strafeLerpAlpha = 1 - math.exp(-deltaTime * 12)
+		self.strafeTilt = self.strafeTilt + (targetStrafeTilt - self.strafeTilt) * strafeLerpAlpha
+		self.strafeOffset = self.strafeOffset + (targetStrafeOffset - self.strafeOffset) * strafeLerpAlpha
+
+		local bobTarget = CFrame.new(
+			math.cos(tick() * bobSpeed) * (0.1 * vmScale) + self.strafeOffset,
+			-(humanoid.CameraOffset.Y / 3) * vmScale,
+			0
+		) * CFrame.Angles(
+			0,
+			math.sin(tick() * -bobSpeed) * (-0.1 * vmScale),
+			math.cos(tick() * -bobSpeed) * (0.1 * vmScale) + self.strafeTilt
+		) * sprintOffset
+
+		local bobLerpAlpha = 1 - math.exp(-deltaTime * 8)
+		self.bobOffset = self.bobOffset:Lerp(bobTarget, bobLerpAlpha)
 	else
 		local cameraOffsetY = humanoid and humanoid.CameraOffset.Y or 0
-		self.bobOffset = self.bobOffset:Lerp(
-			CFrame.new(0, -cameraOffsetY / 3, 0),
-			math.clamp((self.config.camera.bobIdleLerp or 0.1) * 0.6, 0, 1)
-		)
+
+		-- smooth return to neutral when stopping
+		local moveLerpAlpha = 1 - math.exp(-deltaTime * 10)
+		self.smoothedLocalMoveDir = self.smoothedLocalMoveDir:Lerp(Vector3.zero, moveLerpAlpha)
+
+		local strafeLerpAlpha = 1 - math.exp(-deltaTime * 12)
+		self.strafeTilt = self.strafeTilt + (0 - self.strafeTilt) * strafeLerpAlpha
+		self.strafeOffset = self.strafeOffset + (0 - self.strafeOffset) * strafeLerpAlpha
+
+		local idleTarget = CFrame.new(0, -(cameraOffsetY / 3) * vmScale, 0)
+		local bobLerpAlpha = 1 - math.exp(-deltaTime * 6)
+		self.bobOffset = self.bobOffset:Lerp(idleTarget, bobLerpAlpha)
 	end
 
 	local wallTarget = self:_getWallOffset(camera)
@@ -110,13 +152,16 @@ function viewmodelController:update(deltaTime)
 		self.shakeVelocity:Lerp(Vector3.zero, math.clamp(deltaTime * (self.config.camera.shakeDecay or 10), 0, 1))
 	self.shakeOffset = self.shakeOffset:Lerp(self.shakeVelocity, 0.25)
 
+	local baseOffset = self.config.camera and self.config.camera.viewmodelOffset or CFrame.new(0, 0, -0.6)
+
 	self.viewmodel:PivotTo(
 		camera.CFrame
-			* self.config.camera.viewmodelOffset
+			* baseOffset
 			* self.wallOffset
 			* self.swayOffset
-			* CFrame.new(self.shakeOffset)
+			* self.aimOffset
 			* self.bobOffset
+			* CFrame.new(self.shakeOffset * vmScale)
 	)
 end
 
@@ -207,11 +252,29 @@ function viewmodelController:_setPartsVisible(isVisible)
 		return
 	end
 
+	local hiddenParts = self.config.effects and self.config.effects.hiddenViewmodelParts or {}
+	local selectedStage = math.clamp(tonumber(self.config.stage) or 1, 1, 3)
+	local selectedUpgradeName = "audrey_ink_Gentpipe_Upgrade" .. selectedStage
+
 	for _, descendant in ipairs(self.viewmodel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
-			descendant.Transparency = isVisible
-					and (self.config.effects.hiddenViewmodelParts[descendant.Name] and 1 or 0)
-				or 1
+			local transparency = 0
+
+			if not isVisible then
+				transparency = 1
+			elseif hiddenParts[descendant.Name] then
+				transparency = 1
+			end
+
+			if descendant.Name:match("^audrey_ink_Gentpipe_Upgrade%d+$") then
+				if descendant.Name == selectedUpgradeName and isVisible then
+					transparency = 0
+				else
+					transparency = 1
+				end
+			end
+
+			descendant.Transparency = transparency
 		end
 	end
 end
@@ -233,6 +296,7 @@ function viewmodelController:_loadAnimations()
 		animation.AnimationId = animationId
 		self.animations[name] = animator:LoadAnimation(animation)
 	end
+
 	self.animations.primaryAttack = self.animations.primaryAttack or self.animations.fire
 	self.animations.secondaryAttack = self.animations.secondaryAttack or self.animations.fire2
 end
@@ -260,7 +324,7 @@ function viewmodelController:_getWallOffset(camera)
 		return CFrame.new()
 	end
 
-	local pushBack = math.clamp(1.75 - result.Distance, 0, 0.45)
+	local pushBack = math.clamp((1.75 * vmScale) - result.Distance, 0, 0.45 * vmScale)
 	if pushBack <= 0 then
 		return CFrame.new()
 	end

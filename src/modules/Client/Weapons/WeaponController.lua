@@ -208,4 +208,12 @@ function weaponController:_applyStateAttributes()
 	end
 end
 
+function weaponController:setStage(stage)
+	self.config.stage = math.clamp(tonumber(stage) or 1, 1, 3)
+
+	if self.isEquipped and self.viewmodelController and self.viewmodelController.viewmodel then
+		self.viewmodelController:_setPartsVisible(true)
+	end
+end
+
 return weaponController

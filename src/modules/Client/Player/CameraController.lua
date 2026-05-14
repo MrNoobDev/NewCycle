@@ -1,24 +1,45 @@
--- camera controller
---//
-
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local cameraController = {}
 cameraController.__index = cameraController
 
+local idleDriftSpeed = 0.28
+local idleDriftAmp = 0.0035
+
+local bobSpeedWalk = 4.5
+local bobYWalk = 0.06
+local bobXWalk = 0.025
+local bobZWalk = 0.012
+local bobTiltWalk = 0.018
+
+local bobSpeedRun = 5.8
+local bobYRun = 0.10
+local bobXRun = 0.038
+local bobZRun = 0.018
+local bobTiltRun = 0.032
+
+local landSpring = 18
+local landDamping = 0.72
+local landBounceMin = -0.55
+local landBounceMax = 0.18
+local landInitialVel = -0.42
+
 function cameraController.new(config)
 	local self = setmetatable({}, cameraController)
 	self.config = config
+
 	self.character = nil
 	self.humanoid = nil
 	self.head = nil
 	self.rootPart = nil
 
 	self.bobTime = 0
-	self.swayTime = 0
-	self.cameraOffset = CFrame.new()
-	self.shakeOffset = CFrame.new()
+	self.bobOffset = CFrame.new()
+
+	self.driftTime = math.random() * 100
+
 	self.activeShakeValue = nil
 
 	self.isGrounded = true
@@ -26,11 +47,21 @@ function cameraController.new(config)
 	self.landBounceOffset = 0
 	self.landBounceVelocity = 0
 
-	self.crouchCameraOffset = CFrame.new()
-	self.crouchCameraTarget = CFrame.new()
-	self.lastCrouchKickToken = 0
+	self.angleX = 0
+	self.bobX = 0
+	self.bobY = 0
+	self.tilt = 0
+	self.vX = 0
+	self.vY = 0
+	self.sX = 10
+	self.sY = 10
+
+	self.crouchKickOffset = CFrame.new()
+	self.crouchKickTarget = CFrame.new()
+	self.lastCrouchToken = 0
 
 	self.characterConnections = {}
+
 	return self
 end
 
@@ -43,16 +74,14 @@ function cameraController:setCharacter(character)
 	self.rootPart = nil
 
 	self.bobTime = 0
-	self.swayTime = 0
-	self.cameraOffset = CFrame.new()
-	self.shakeOffset = CFrame.new()
+	self.bobOffset = CFrame.new()
 	self.isGrounded = true
 	self.wasGrounded = true
 	self.landBounceOffset = 0
 	self.landBounceVelocity = 0
-	self.crouchCameraOffset = CFrame.new()
-	self.crouchCameraTarget = CFrame.new()
-	self.lastCrouchKickToken = 0
+	self.crouchKickOffset = CFrame.new()
+	self.crouchKickTarget = CFrame.new()
+	self.lastCrouchToken = 0
 
 	if not character then
 		return
@@ -71,11 +100,11 @@ function cameraController:setCharacter(character)
 				end
 
 				self.isGrounded = false
-				self:_playShakeSequence(0, -0.75, 0.15, Enum.EasingStyle.Sine, 0.225, 0.6, Enum.EasingStyle.Sine)
+				self:_playShakeSequence(0, -0.6, 0.12, Enum.EasingStyle.Sine, 0.18, 0.55, Enum.EasingStyle.Sine)
 			elseif newState == Enum.HumanoidStateType.Freefall then
 				self.isGrounded = false
 			elseif newState == Enum.HumanoidStateType.Landed then
-				self:_playShakeSequence(-0.25, 0, 0.15, Enum.EasingStyle.Sine, 0.50, 0.6, Enum.EasingStyle.Sine)
+				self:_playShakeSequence(-0.22, 0, 0.13, Enum.EasingStyle.Sine, 0.45, 0.65, Enum.EasingStyle.Sine)
 			end
 		end)
 	)
@@ -83,18 +112,25 @@ end
 
 function cameraController:update(dt, stateController)
 	local camera = Workspace.CurrentCamera
-	if not camera or not self.humanoid or not self.rootPart or camera.CameraType ~= Enum.CameraType.Custom then
+	if
+		not camera
+		or not self.humanoid
+		or not self.humanoid.Parent
+		or not self.rootPart
+		or not self.rootPart.Parent
+		or camera.CameraType ~= Enum.CameraType.Custom
+	then
 		return
 	end
 
 	self:_updateFov(dt, stateController)
 	self:_updateLandBounce(dt)
-	self:_updateCameraMotion(dt, stateController)
+	self:_updateBob(dt, stateController)
+	self:_updateCrouchKick(stateController)
 	self:_updateFirstPersonBody()
-	self:_updateCrouchCameraKick()
-	self:_applyCrouchKick(stateController)
 
-	camera.CFrame = camera.CFrame * self.cameraOffset * self.crouchCameraOffset * self.shakeOffset
+	local shake = self.activeShakeValue and self.activeShakeValue.Value or CFrame.new()
+	camera.CFrame = camera.CFrame * self.bobOffset * self.crouchKickOffset * shake
 end
 
 function cameraController:destroy()
@@ -108,34 +144,30 @@ end
 
 function cameraController:_updateFov(dt, stateController)
 	local camera = Workspace.CurrentCamera
-	local runFov = self.config.camera.runFov or 90
-	local normalFov = self.config.camera.normalFov or 80
-	local fovLerp = self.config.camera.fovLerp or 4
-	local targetFov = stateController:isRunning() and runFov or normalFov
+	local cfg = self.config.camera
+	local runFov = cfg and cfg.runFov or 90
+	local normalFov = cfg and cfg.normalFov or 80
+	local lerp = cfg and cfg.fovLerp or 4
+	local target = stateController:isRunning() and runFov or normalFov
 
-	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.clamp(dt * fovLerp, 0, 1)
+	camera.FieldOfView = camera.FieldOfView + (target - camera.FieldOfView) * math.clamp(dt * lerp, 0, 1)
 end
 
 function cameraController:_updateLandBounce(dt)
 	self.isGrounded = self:_checkGrounded()
 
 	if self.isGrounded and not self.wasGrounded and self.humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
-		self.landBounceVelocity = -0.35
+		self.landBounceVelocity = landInitialVel
 	end
 
 	self.wasGrounded = self.isGrounded
 
 	if self.landBounceOffset ~= 0 or self.landBounceVelocity ~= 0 then
-		local landSpring = self.config.camera.landSpring or 15
-		local landDamping = self.config.camera.landDamping or 0.85
-		local landBounceMin = self.config.camera.landBounceMin or -0.4
-		local landBounceMax = self.config.camera.landBounceMax or 0.2
+		self.landBounceVelocity = self.landBounceVelocity + dt * landSpring
+		self.landBounceOffset = self.landBounceOffset + self.landBounceVelocity
+		self.landBounceVelocity = self.landBounceVelocity * landDamping
 
-		self.landBounceVelocity += dt * landSpring
-		self.landBounceOffset += self.landBounceVelocity
-		self.landBounceVelocity *= landDamping
-
-		if math.abs(self.landBounceOffset) < 0.01 and math.abs(self.landBounceVelocity) < 0.01 then
+		if math.abs(self.landBounceOffset) < 0.005 and math.abs(self.landBounceVelocity) < 0.005 then
 			self.landBounceOffset = 0
 			self.landBounceVelocity = 0
 		end
@@ -144,51 +176,104 @@ function cameraController:_updateLandBounce(dt)
 	end
 end
 
-function cameraController:_updateCameraMotion(dt, stateController)
+function cameraController:_updateBob(dt, stateController)
 	local camera = Workspace.CurrentCamera
-	local velocity = self.rootPart.AssemblyLinearVelocity
-	local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-	local isMoving = horizontalVelocity > 0.5 and self.isGrounded
+	local humanoid = self.humanoid
+	local rootPart = self.rootPart
 
-	local targetOffset = CFrame.new()
-
-	if isMoving then
-		local bobbingSpeedWalk = self.config.camera.bobbingSpeedWalk or 10
-		local bobbingSpeedRun = self.config.camera.bobbingSpeedRun or 12
-		local bobbingAmountWalk = self.config.camera.bobbingAmountWalk or 0.15
-		local bobbingAmountRun = self.config.camera.bobbingAmountRun or 0.2
-		local bobbingHorizontalWalk = self.config.camera.bobbingHorizontalWalk or 0
-		local bobbingHorizontalRun = self.config.camera.bobbingHorizontalRun or 0
-		local bobbingDepthWalk = self.config.camera.bobbingDepthWalk or 0.05
-		local bobbingDepthRun = self.config.camera.bobbingDepthRun or 0.07
-		local swayAmountWalk = self.config.camera.swayAmountWalk or 0.15
-		local swayAmountRun = self.config.camera.swayAmountRun or 0.2
-		local swaySpeed = self.config.camera.swaySpeed or 1
-
-		local currentBobbingSpeed = stateController:isRunning() and bobbingSpeedRun or bobbingSpeedWalk
-		local bobbingAmount = stateController:isRunning() and bobbingAmountRun or bobbingAmountWalk
-		local bobbingHorizontal = stateController:isRunning() and bobbingHorizontalRun or bobbingHorizontalWalk
-		local bobbingDepth = stateController:isRunning() and bobbingDepthRun or bobbingDepthWalk
-		local swayAmount = stateController:isRunning() and swayAmountRun or swayAmountWalk
-
-		self.bobTime += dt * currentBobbingSpeed * math.max(horizontalVelocity / 16, 0.1)
-		self.swayTime += dt * swaySpeed
-
-		local bobY = math.sin(self.bobTime * 2) * bobbingAmount
-		local bobX = math.cos(self.bobTime) * bobbingHorizontal
-		local bobZ = math.sin(self.bobTime) * bobbingDepth
-		local swayTilt = math.sin(self.swayTime) * swayAmount
-
-		targetOffset = CFrame.new(bobX, bobY, bobZ) * CFrame.Angles(0, 0, math.rad(swayTilt))
-	else
-		self.bobTime = 0
-		self.swayTime = 0
+	if not camera or not humanoid or not rootPart then
+		self.bobOffset = self.bobOffset:Lerp(CFrame.new(), math.clamp(dt * 8, 0, 1))
+		return
 	end
 
-	targetOffset *= CFrame.new(0, self.landBounceOffset, 0)
+	local velocityVector = rootPart.AssemblyLinearVelocity
+	local flatVelocity = Vector3.new(velocityVector.X, 0, velocityVector.Z)
+	local speed = flatVelocity.Magnitude
 
-	self.cameraOffset = self.cameraOffset:Lerp(targetOffset, math.clamp(dt * 10, 0, 1))
-	self.shakeOffset = self.activeShakeValue and self.activeShakeValue.Value or CFrame.new()
+	if speed <= 0.05 or not self.isGrounded then
+		self.angleX = self.angleX + (0 - self.angleX) * math.clamp(dt * 8, 0, 1)
+		self.bobX = self.bobX + (0 - self.bobX) * math.clamp(dt * 8, 0, 1)
+		self.bobY = self.bobY + (0 - self.bobY) * math.clamp(dt * 8, 0, 1)
+		self.tilt = self.tilt + (0 - self.tilt) * math.clamp(dt * 8, 0, 1)
+		self.vX = self.vX + (0 - self.vX) * math.clamp(dt * 8, 0, 1)
+		self.vY = self.vY + (0 - self.vY) * math.clamp(dt * 8, 0, 1)
+
+		self.bobOffset = self.bobOffset:Lerp(CFrame.new(0, self.landBounceOffset, 0), math.clamp(dt * 8, 0, 1))
+		return
+	end
+
+	local scaledDt = math.min(dt * 60, 2)
+	local isRunning = stateController:isRunning()
+
+	local bobSpeed = isRunning and 15 or 10
+	local bobStrength = isRunning and 12 or 9
+
+	if scaledDt <= 2 then
+		self.vX = self.vX
+			+ ((math.cos(time() * 0.45) * 0.015 * scaledDt - self.vX) * math.clamp(0.035 * scaledDt, 0, 1))
+
+		self.vY = self.vY + ((math.cos(time() * 0.4) * 0.008 * scaledDt - self.vY) * math.clamp(0.03 * scaledDt, 0, 1))
+	end
+	local moveDir = humanoid.MoveDirection
+	local localMoveDir = rootPart.CFrame:VectorToObjectSpace(moveDir)
+	local directionalTilt = math.clamp(-localMoveDir.X * 0.035, -0.035, 0.035)
+
+	local moveSpaceVelocity = camera.CFrame:VectorToObjectSpace(velocityVector / math.max(humanoid.WalkSpeed, 0.01))
+	local velocityTilt = math.clamp(-moveSpaceVelocity.X * 0.02, -0.02, 0.02)
+	local targetTilt = directionalTilt + velocityTilt
+
+	local mouseDeltaX = UserInputService:GetMouseDelta().X
+
+	self.angleX = self.angleX
+		+ (math.clamp(mouseDeltaX / math.max(scaledDt, 0.001) * 0.06, -1.2, 1.2) - self.angleX)
+			* math.clamp(0.18 * scaledDt, 0, 1)
+
+	local turnTilt = math.clamp(-mouseDeltaX * 0.0007, -0.02, 0.02)
+	local combinedTilt = targetTilt + turnTilt
+
+	self.tilt = self.tilt + (combinedTilt - self.tilt) * math.clamp(0.09 * scaledDt, 0, 1)
+
+	self.bobX = self.bobX
+		+ (math.sin(time() * bobSpeed) / 7 * math.min(1, bobStrength / 10) - self.bobX)
+			* math.clamp(0.2 * scaledDt, 0, 1)
+
+	if speed > 1 then
+		self.bobY = self.bobY
+			+ (math.cos(time() * 0.5 * bobSpeed) * (bobSpeed / 280) - self.bobY) * math.clamp(0.2 * scaledDt, 0, 1)
+	else
+		self.bobY = self.bobY + (0 - self.bobY) * math.clamp(0.06 * scaledDt, 0, 1)
+	end
+
+	local target = CFrame.new(0, self.landBounceOffset, 0)
+		* CFrame.Angles(0, 0, math.rad(self.angleX))
+		* CFrame.Angles(
+			math.rad(math.clamp(self.bobX * scaledDt, -0.08, 0.08)),
+			math.rad(math.clamp(self.bobY * scaledDt, -0.22, 0.22)),
+			self.tilt
+		)
+		* CFrame.Angles(math.rad(self.vX), math.rad(self.vY), math.rad(self.vY * 3.5))
+
+	self.bobOffset = self.bobOffset:Lerp(target, math.clamp(dt * 10, 0, 1))
+end
+
+function cameraController:_updateCrouchKick(stateController)
+	local token = stateController:getCrouchKickToken()
+
+	local isCrouching = stateController:isCrouching()
+
+	if token ~= self.lastCrouchToken then
+		self.lastCrouchToken = token
+
+		if isCrouching then
+			self.crouchKickOffset = CFrame.Angles(math.rad(4), 0, 0)
+			self.crouchKickTarget = CFrame.Angles(math.rad(-6), 0, 0)
+		else
+			self.crouchKickTarget = CFrame.new()
+		end
+	end
+
+	local lerpSpeed = isCrouching and 0.15 or 0.08
+	self.crouchKickOffset = self.crouchKickOffset:Lerp(self.crouchKickTarget, lerpSpeed)
 end
 
 function cameraController:_updateFirstPersonBody()
@@ -198,63 +283,31 @@ function cameraController:_updateFirstPersonBody()
 
 	local camera = Workspace.CurrentCamera
 	local distance = (camera.CFrame.Position - self.head.Position).Magnitude
-	if distance >= 1.5 then
-		for _, obj in ipairs(self.character:GetDescendants()) do
-			if obj:IsA("BasePart") then
-				obj.LocalTransparencyModifier = 0
-			elseif obj:IsA("Accessory") then
-				local handle = obj:FindFirstChild("Handle")
-				if handle and handle:IsA("BasePart") then
-					handle.LocalTransparencyModifier = 0
-				end
-			end
-		end
-		return
-	end
 
 	for _, obj in ipairs(self.character:GetDescendants()) do
 		if obj:IsA("BasePart") then
-			obj.LocalTransparencyModifier = obj:GetAttribute("ForceVisibleInFirstPerson") and 0 or 1
+			obj.LocalTransparencyModifier = (distance >= 1.5 or obj:GetAttribute("ForceVisibleInFirstPerson")) and 0
+				or 1
 		elseif obj:IsA("Accessory") then
 			local handle = obj:FindFirstChild("Handle")
 			if handle and handle:IsA("BasePart") then
-				handle.LocalTransparencyModifier = handle:GetAttribute("ForceVisibleInFirstPerson") and 0 or 1
+				handle.LocalTransparencyModifier = (distance >= 1.5 or handle:GetAttribute("ForceVisibleInFirstPerson"))
+						and 0
+					or 1
 			end
 		end
 	end
 end
 
-function cameraController:_updateCrouchCameraKick()
-	self.crouchCameraOffset = self.crouchCameraOffset:Lerp(self.crouchCameraTarget, 0.15)
-end
-
-function cameraController:_applyCrouchKick(stateController)
-	local token = stateController:getCrouchKickToken()
-	if token == self.lastCrouchKickToken then
-		return
+function cameraController:_checkGrounded()
+	if not self.rootPart or not self.rootPart.Parent then
+		return true
 	end
 
-	self.lastCrouchKickToken = token
-
-	self.crouchCameraTarget = CFrame.Angles(math.rad(4), 0, 0)
-
-	task.delay(0.08, function()
-		if self.lastCrouchKickToken == token then
-			self.crouchCameraTarget = CFrame.Angles(math.rad(-6), 0, 0)
-		end
-	end)
-
-	task.delay(0.2, function()
-		if self.lastCrouchKickToken == token then
-			self.crouchCameraTarget = CFrame.new()
-		end
-	end)
-end
-
-function cameraController:_checkGrounded()
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { self.character }
+
 	return Workspace:Raycast(self.rootPart.Position, Vector3.new(0, -4, 0), params) ~= nil
 end
 
@@ -262,7 +315,7 @@ function cameraController:_playShakeSequence(
 	startAngle,
 	endAngle,
 	duration,
-	easingStyle,
+	easeStyle,
 	recoveryAngle,
 	recoveryDuration,
 	recoveryEasing
@@ -272,52 +325,52 @@ function cameraController:_playShakeSequence(
 		self.activeShakeValue = nil
 	end
 
-	local initialShake = Instance.new("CFrameValue")
-	initialShake.Value = CFrame.Angles(math.rad(startAngle), 0, 0)
-	self.activeShakeValue = initialShake
+	local v0 = Instance.new("CFrameValue")
+	v0.Value = CFrame.Angles(math.rad(startAngle), 0, 0)
+	self.activeShakeValue = v0
 
-	local initialTween = TweenService:Create(
-		initialShake,
-		TweenInfo.new(duration, easingStyle, Enum.EasingDirection.Out),
+	local t0 = TweenService:Create(
+		v0,
+		TweenInfo.new(duration, easeStyle, Enum.EasingDirection.Out),
 		{ Value = CFrame.Angles(math.rad(endAngle), 0, 0) }
 	)
 
-	local initialConnection
-	initialConnection = initialTween.Completed:Connect(function()
-		initialConnection:Disconnect()
-		initialTween:Destroy()
+	local c0
+	c0 = t0.Completed:Connect(function()
+		c0:Disconnect()
+		t0:Destroy()
 
-		local recoveryShake = Instance.new("CFrameValue")
-		recoveryShake.Value = CFrame.Angles(math.rad(recoveryAngle), 0, 0)
-		self.activeShakeValue = recoveryShake
+		local v1 = Instance.new("CFrameValue")
+		v1.Value = CFrame.Angles(math.rad(recoveryAngle), 0, 0)
+		self.activeShakeValue = v1
 
-		local recoveryTween = TweenService:Create(
-			recoveryShake,
+		local t1 = TweenService:Create(
+			v1,
 			TweenInfo.new(recoveryDuration, recoveryEasing, Enum.EasingDirection.Out),
 			{ Value = CFrame.new() }
 		)
 
-		local recoveryConnection
-		recoveryConnection = recoveryTween.Completed:Connect(function()
-			recoveryConnection:Disconnect()
-			recoveryTween:Destroy()
-			recoveryShake:Destroy()
+		local c1
+		c1 = t1.Completed:Connect(function()
+			c1:Disconnect()
+			t1:Destroy()
+			v1:Destroy()
 
-			if self.activeShakeValue == recoveryShake then
+			if self.activeShakeValue == v1 then
 				self.activeShakeValue = nil
 			end
 		end)
 
-		recoveryTween:Play()
+		t1:Play()
 	end)
 
-	initialTween:Play()
+	t0:Play()
 end
 
 function cameraController:_disconnectCharacter()
-	for index = #self.characterConnections, 1, -1 do
-		self.characterConnections[index]:Disconnect()
-		self.characterConnections[index] = nil
+	for i = #self.characterConnections, 1, -1 do
+		self.characterConnections[i]:Disconnect()
+		self.characterConnections[i] = nil
 	end
 end
 
